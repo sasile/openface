@@ -57,7 +57,7 @@ class TorchNeuralNet:
         assert imgDim is not None
         assert cuda is not None
 
-        self.cmd = ['/usr/bin/env', 'th', os.path.join(myDir, 'openface_server.lua'),
+        self.cmd = ['/usr/bin/env', '/Users/sasilevi/torch/install/bin/th', os.path.join(myDir, 'openface_server.lua'),
                     '-model', model, '-imgDim', str(imgDim)]
         if cuda:
             self.cmd.append('-cuda')

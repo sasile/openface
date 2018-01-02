@@ -18,8 +18,11 @@ import os
 import sys
 import glob
 fileDir = os.path.dirname(os.path.realpath(__file__))
+tls_key = os.path.join(fileDir, 'tls', 'server.key')
+tls_crt = os.path.join(fileDir, 'tls', 'server.crt')
 sys.path.append(os.path.join(fileDir, "..", ".."))
-
+from twisted.internet.ssl import DefaultOpenSSLContextFactory
+from twisted.internet import task, defer
 import txaio
 txaio.use_twisted()
 
@@ -436,7 +439,7 @@ class OpenFaceServerProtocol(WebSocketServerProtocol):
         plt.close()
         self.sendMessage(json.dumps(msg))
 
-if __name__ == '__main__':
+def main(reactor):
     log.startLogging(sys.stdout)
 
     # dir_path = os.path.join(fileDir, 'train_img')
@@ -445,6 +448,11 @@ if __name__ == '__main__':
     factory = WebSocketServerFactory("ws://localhost:{}".format(args.port),
                                      debug=False)
     factory.protocol = OpenFaceServerProtocol
+    ctx_factory = DefaultOpenSSLContextFactory(tls_key, tls_crt)
+    # reactor.listenTCP(args.port, factory)
+    reactor.listenSSL(args.port, factory, ctx_factory)
+    # reactor.run()
+    return defer.Deferred()
 
-    reactor.listenTCP(args.port, factory)
-    reactor.run()
+if __name__ == '__main__':
+    task.react(main)

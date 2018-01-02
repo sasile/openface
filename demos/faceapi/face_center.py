@@ -117,7 +117,7 @@ class FaceCenterOf(FaceCenter):
     def train(self, img):
         if self._training_id == -1:
             self._log.error('[ERROR] Call start_train first, please.')
-            return False
+            return
 
         add_face_list = []
         # for img in image_list:
@@ -131,7 +131,7 @@ class FaceCenterOf(FaceCenter):
 
         if len(db_list) > 0:
             self._log.debug('trained image, skip it')
-            return False
+            return
 
         # start to train the faces in the image
         t = time.time()
