@@ -156,6 +156,7 @@ function sendState() {
         'type': 'ALL_STATE',
         'images': images,
         'people': people,
+        'emails': emails,
         'training': training
     };
     socket.send(JSON.stringify(msg));
@@ -209,6 +210,7 @@ function createSocket(address, name) {
                 representation: db_info.representation
                 });
                 people[db_info.identity] = db_info.name;
+                emails[db_info.identity] = db_info.email;
             };
             console.timeEnd("addtimer")
             console.log("loop times: %d, and images: %d", loopCnt, images.length)
@@ -251,7 +253,10 @@ function createSocket(address, name) {
             BootstrapDialog.show({
                 message: "<img src='" + j['content'] + "' width='100%'></img>"
             });
-        } else {
+        } else if (j.type == "PERSON_NAME") {
+            people.push( j['content'])
+            redrawPeople();
+        }else {
             console.log("Unrecognized message type: " + j.type);
         }
     }
@@ -282,7 +287,7 @@ function addPersonCallback(el) {
     defaultPerson = people.length;
     var newPerson = $("#addPersonTxt").val();
     if (newPerson == "") return;
-    people.push(newPerson);
+    //people.push(newPerson);
     $("#addPersonTxt").val("");
 
     if (socket != null) {

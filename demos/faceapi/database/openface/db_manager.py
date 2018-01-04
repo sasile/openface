@@ -34,6 +34,7 @@ _SQL_CMD_CREATE_TAB = "CREATE TABLE IF NOT EXISTS "
 _SQL_TABLE_FACE = (
     "face_table(hash TEXT PRIMARY KEY, "
     "name TEXT, "
+    "email TEXT, "
     "eigen TEXT, "
     "src_hash TEXT, "
     "face_img TEXT, "
@@ -43,10 +44,24 @@ _SQL_ROWS = "SELECT COUNT(*) FROM face_table"
 _SQL_ADD_FACE = (
     "INSERT or REPLACE INTO "
     "face_table "
-    "VALUES(?, ?, ?, ?, ?, ?)")
+    "VALUES(?, ?, ?, ?, ?, ?, ?)")
 _SQL_GET_FACE_WITH_FIELD = "SELECT * FROM face_table WHERE {}={} LIMIT {}"
 _SQL_DISTINCT_SEARCH = "select distinct {} from face_table order by {}"
 
+_SQL_TABLE_USER = (
+    "user_table(email TEXT PRIMARY KEY, "
+    "name TEXT, "
+    "last TEXT, "
+    "slack_token TEXT, "
+    "department TEXT, "
+    "job_title TEXT, "
+    "face_class_id INTEGER, "
+    "FOREIGN KEY(face_class_id) REFERENCES face_table(class_id))")
+
+_SQL_ADD_USER = (
+    "INSERT or REPLACE INTO "
+    "user_table "
+    "VALUES(?, ?, ?, ?, ?, ?, ?)")
 
 """
 .d8888b.  888
@@ -75,6 +90,7 @@ class DbManagerOpenface(DbManager):
             with sqlite3.connect(self._db_file) as db:
                 cur = db.cursor()
                 cur.execute(_SQL_CMD_CREATE_TAB + _SQL_TABLE_FACE)
+                cur.execute(_SQL_CMD_CREATE_TAB + _SQL_TABLE_USER)
                 db.commit()
         except sqlite3.Error as e:
             self._log.error(str(e))
@@ -126,7 +142,7 @@ class DbManagerOpenface(DbManager):
         for record in record_list:
             rep_str = ",".join(str(x) for x in record.eigen)
             info = (
-                record.hash, record.name, rep_str,
+                record.hash, record.name, record.email, rep_str,
                 record.src_hash, record.face_img, record.class_id)
             self._log.debug("add: " + str(info))
             sql_add_list.append(info)
@@ -175,3 +191,33 @@ class DbManagerOpenface(DbManager):
             raise e
 
         return rows
+
+    def create_user(self, user_info):
+        try:
+            db = sqlite3.connect(self._db_file)
+            cur = db.cursor()
+        except sqlite3.Error as e:
+            self._log.error(str(e))
+            raise exceptions.LibError(str(e))
+
+        info = (
+                   user_info.email,
+                   user_info.name,
+                   user_info.last,
+                   user_info.slack_token,
+                   user_info.department,
+                   user_info.job_title,
+                   user_info.face_class_id
+        )
+        try:
+            print info
+            cur.execute(_SQL_ADD_USER, info)
+        except sqlite3.Error as e:
+            self._log.error(str(e))
+
+        db.commit()
+        db.close()
+        pass
+
+    def update_user(self, user_info):
+        return self.add_user(user_info=user_info)

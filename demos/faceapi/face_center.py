@@ -49,6 +49,7 @@ class FaceCenterOf(FaceCenter):
         self._face_classifier = faceapi.classifier.make_classifier(db_file)
         self._training_id = -1
         self._trainint_name = ''
+        self._trainint_email = ''
         self._trainint_cb = None
 
     def faceList(self):
@@ -57,6 +58,7 @@ class FaceCenterOf(FaceCenter):
             face_info = faceapi.FaceInfo(
                 info['hash'].encode('ascii', 'ignore'),
                 info['name'],
+                info['email'],
                 [float(x) for x in info['eigen'].split(',')],
                 info['src_hash'].encode('ascii', 'ignore'),
                 info['face_img'].encode('ascii', 'ignore'),
@@ -64,6 +66,8 @@ class FaceCenterOf(FaceCenter):
             list.append(face_info)
         return list
 
+    def create_user(self, user):
+        self._face_db.create_user(user)
     # def train(self, image, name):
     #     if isinstance(image, basestring):
     #         img = Image.open(image).convert('RGB')
@@ -99,9 +103,10 @@ class FaceCenterOf(FaceCenter):
     #     self._face_classifier.updateDB()
     #     return trained_list
 
-    def start_train(self, name, cb=None):
+    def start_train(self, name, email, cb=None):
         self._training_id = self._toIdentity(name)
         self._trainint_name = name
+        self._trainint_email = email
         self._trainint_cb = cb
 
         if self._training_id is None:
@@ -155,6 +160,7 @@ class FaceCenterOf(FaceCenter):
             record = faceapi.FaceInfo(
                 phash,
                 self._trainint_name,
+                self._trainint_email,
                 rep,
                 src_hash,
                 face_img,
@@ -186,6 +192,7 @@ class FaceCenterOf(FaceCenter):
         self._log.info('face detectime: {}'.format(time.time() - t))
         hit_cnt = 0
         t = time.time()
+        hit = None
         for face in bbs:
             hit = self._face_classifier.predict(face.img)
             phash, rep = self._face_eigener.eigenValue(face.img)
@@ -194,7 +201,7 @@ class FaceCenterOf(FaceCenter):
             hit_cnt += 1
             if callback is not None:
                 callback(
-                    hit.class_id, hit.name, face.area,
+                    hit.class_id, hit.name, hit.email, face.area,
                     face.landmarks, hit.scroe)
 
             # print 'hit name: {}'.format(hit.name)
@@ -207,7 +214,7 @@ class FaceCenterOf(FaceCenter):
                 Image.fromarray(face.img).save(fname)
 
         self._log.info('took time: {}'.format(time.time() - t))
-        return hit_cnt
+        return hit, hit_cnt
 
     def trainDir(self, dir_path):
         if not os.path.isdir(dir_path):
@@ -271,6 +278,26 @@ class FaceCenterOf(FaceCenter):
         class_id = (check_ret[0])[1]
 
         return class_id
+
+    def _toEmail(self, class_id):
+        db_name_map = self._face_db.distinct_search(
+            ['class_id', 'email'], 'email')
+
+        if len(db_name_map) == 0:
+            return None
+
+        check_ret = [
+            (name_dic['email'], name_dic['class_id'])
+            for name_dic in db_name_map
+            if name_dic['class_id'] == class_id]
+
+        if len(check_ret) == 0:
+            return None
+
+        email = (check_ret[0])[1]
+
+        return email
+
 
     def _toPilImg(self, image):
         if isinstance(image, basestring):

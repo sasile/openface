@@ -208,7 +208,7 @@ limitations under the License.
          peopleTableTmpl = Handlebars.compile($("#peopleTableTmpl").html());
      var defaultTok = 1, defaultNumNulls = 20;
      var tok = defaultTok,
-         people = [], defaultPerson = -1,
+         people = [], defaultPerson = -1, emails=[]
          images = [],
          training = false;
      var numNulls, sentTimes, receivedTimes;
@@ -235,6 +235,6 @@ limitations under the License.
      redrawPeople();
      // createSocket("ws://facerec.cmusatyalab.org:9000", "CMU");
 
-    createSocket("wss:" + window.location.hostname + ":9000", "Local");
+    createSocket("tcp:" + window.location.hostname + ":9000", "Local");
     </script>
 </html>

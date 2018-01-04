@@ -24,6 +24,7 @@ sys.path.append(os.path.join(fileDir, "..", ".."))
 from twisted.internet.ssl import DefaultOpenSSLContextFactory
 from twisted.internet import task, defer
 import txaio
+from slacker import Slacker
 txaio.use_twisted()
 
 from autobahn.twisted.websocket import WebSocketServerProtocol, \
@@ -83,7 +84,7 @@ import faceapi
 _face_center = faceapi.share_center(
     os.path.join(fileDir, 'facedb.db3'),
     os.path.join(fileDir, 'db_face'))
-
+_face_classifier = faceapi.classifier.make_classifier(os.path.join(fileDir, 'facedb.db3'))
 
 class Face:
 
@@ -101,9 +102,11 @@ class Face:
 class OpenFaceServerProtocol(WebSocketServerProtocol):
 
     def __init__(self):
+        self.slack = Slacker('xoxp-3934850236-10284295808-292891792864-03a95ada2433be03d28cee9f4c2c722c')
         self.images = {}
         self.training = True
         self.people = []
+        self.emails = []
         self.svm = None
         if args.unknown:
             self.unknownImgs = np.load("./examples/web/unknown.npy")
@@ -152,6 +155,7 @@ class OpenFaceServerProtocol(WebSocketServerProtocol):
             face_info_client = {
                 "hash": info.hash,
                 "name": info.name,
+                "email": info.email,
                 "identity": info.class_id
             }
             face_list.append(face_info_client)
@@ -165,13 +169,43 @@ class OpenFaceServerProtocol(WebSocketServerProtocol):
 
         print("start to restore training data done")
 
+    def find_user_in_slack(self, email ):
+        members = self.slack.users.list()
+        for i in xrange(0, len(members.body["members"])):
+            if "email" in members.body["members"][i]["profile"].keys():
+                if members.body["members"][i]["profile"]["email"] == email:
+                    return members.body["members"][i]["profile"]["real_name"]
+        return None
+
+    def url_to_image(self, url):
+        # download the image, convert it to a NumPy array, and then read
+        # it into OpenCV format
+        resp = urllib.urlopen(url)
+        image = np.asarray(bytearray(resp.read()), dtype="uint8")
+        image = cv2.imdecode(image, cv2.IMREAD_COLOR)
+
+        # return the image
+        return image
+
+    def find_user_avatar_from_slack(self, email):
+        members = self.slack.users.list()
+        for i in xrange(0, len(members.body["members"])):
+            if "email" in members.body["members"][i]["profile"].keys():
+                if "image_32" in members.body["members"][i]["profile"].keys():
+                    if members.body["members"][i]["profile"]["email"] == email:
+                        url = members.body["members"][i]["profile"]["image_32"]
+                        # cv2.imshow('image', self.url_to_image(url) )
+                        return self.url_to_image(url)
+        return None
+
     def onMessage(self, payload, isBinary):
         raw = payload.decode('utf8')
         msg = json.loads(raw)
+        print msg
         print("Received {} message of length {}.".format(
             msg['type'], len(raw)))
         if msg['type'] == "ALL_STATE":
-            self.loadState(msg['images'], msg['training'], msg['people'])
+            self.loadState(msg['images'], msg['training'], msg['people'], msg['emails'])
         elif msg['type'] == "NULL":
             self.sendMessage('{"type": "NULL"}')
         elif msg['type'] == "TrainingFRAME":
@@ -180,6 +214,8 @@ class OpenFaceServerProtocol(WebSocketServerProtocol):
         elif msg['type'] == "FRAME":
             self.processFrame(msg['dataURL'], msg['identity'])
             self.sendMessage('{"type": "PROCESSED"}')
+        elif msg['type'] == "DETECT_PERSON":
+            self.detectPerson(msg['dataURL'])
         elif msg['type'] == "TRAINING":
             self.training = msg['val']
             if not self.training:
@@ -187,8 +223,31 @@ class OpenFaceServerProtocol(WebSocketServerProtocol):
                 # _face_classifier.updateDB()
                 _face_center.finish_train()
         elif msg['type'] == "ADD_PERSON":
-            self.people.append(msg['val'].encode('ascii', 'ignore'))
-            print(self.people)
+            email = msg['val'].encode('ascii', 'ignore')
+            name = self.find_user_in_slack(email)
+            if name == None:
+                self.sendMessage('{"type": "FAILED", "MSG": "EMAIL NOT EXIST"}')
+            else:
+                msg = {
+                    "type": "PERSON_NAME",
+                    "content": name
+                }
+                self.people.append(name)
+                self.emails.append(email)
+                self.sendMessage(json.dumps(msg))
+                # self.people.append(msg['val'].encode('ascii', 'ignore'))
+            # print(self.people)
+        elif msg['type'] == "CREATE_USER":
+            if self.create_user(msg):
+                self.sendMessage('{"type": "SUCCESS"}')
+            else:
+                self.sendMessage('{"type": "FAILED"}')
+        elif msg['type'] == "UPDATE_USER":
+            if self.create_user(msg):
+                self.sendMessage('{"type": "SUCCESS"}')
+            else:
+                self.sendMessage('{"type": "FAILED"}')
+
         elif msg['type'] == "UPDATE_IDENTITY":
             h = msg['hash'].encode('ascii', 'ignore')
             if h in self.images:
@@ -213,7 +272,7 @@ class OpenFaceServerProtocol(WebSocketServerProtocol):
     def onClose(self, wasClean, code, reason):
         print("WebSocket connection closed: {0}".format(reason))
 
-    def loadState(self, jsImages, training, jsPeople):
+    def loadState(self, jsImages, training, jsPeople, jsEmails):
         self.training = training
 
         # init it from initFaceDB
@@ -223,8 +282,11 @@ class OpenFaceServerProtocol(WebSocketServerProtocol):
         #                           jsImage['identity'])
 
         for jsPerson in jsPeople:
-            self.people.append(jsPerson.encode('ascii', 'ignore'))
-
+            if jsPerson != None:
+                self.people.append(jsPerson.encode('ascii', 'ignore'))
+        for jsEmail in jsEmails:
+            if jsEmail != None:
+                self.emails.append(jsEmail.encode('ascii', 'ignore'))
         if not training:
             self.trainSVM()
 
@@ -254,6 +316,21 @@ class OpenFaceServerProtocol(WebSocketServerProtocol):
         y = np.array(y)
 
         return (X, y)
+
+    def create_user(self, msg):
+        # self, name, last, email, slack_tocken, department, job_title, face_class_id
+        user = faceapi.UserInfo(
+            msg['name'].encode('ascii', 'ignore'),
+            msg['last'].encode('ascii', 'ignore'),
+            msg['email'].encode('ascii', 'ignore'),
+            msg['slack_token'].encode('ascii', 'ignore'),
+            msg['department'].encode('ascii', 'ignore'),
+            msg['job_title'].encode('ascii', 'ignore'),
+            msg['face_class_id'],
+            )
+        _face_center.create_user(user)
+        return False
+
 
     def sendTSNE(self, people):
         d = self.getData()
@@ -322,7 +399,8 @@ class OpenFaceServerProtocol(WebSocketServerProtocol):
         img = Image.open(imgF)
 
         name = self.people[identity]
-        _face_center.start_train(name)
+        email = self.emails[identity]
+        _face_center.start_train(name, email)
         # trained_list = _face_center.train([imgdata], name)
         info = _face_center.train(img)
 
@@ -333,6 +411,7 @@ class OpenFaceServerProtocol(WebSocketServerProtocol):
         msg = {
             "type": "NEW_IMAGE",
             "name": name,
+            "email": email,
             "hash": phash,
             # "content": content,
             "identity": identity}
@@ -380,7 +459,7 @@ class OpenFaceServerProtocol(WebSocketServerProtocol):
         annotatedFrame = np.copy(buf)
         identities = []
 
-        def hit_callback(class_id, name, area, landmarks, score):
+        def hit_callback(class_id, name, email, area, landmarks, score):
             # draw the face area
             if class_id not in identities:
                 identities.append(class_id)
@@ -388,6 +467,25 @@ class OpenFaceServerProtocol(WebSocketServerProtocol):
             tr = (area.right(), area.top())
             cv2.rectangle(annotatedFrame, bl, tr, color=(153, 255, 204),
                           thickness=3)
+            # avatar_img = self.find_user_avatar_from_slack(email)
+            # cv2.imread()
+            # annotatedFrame.
+            # import cv2.cv as cv
+            # cv2.LoadImage()
+            # cv2.imread(avatar_img)
+            # if avatar_img != None:
+            #
+            #     x_offset = y_offset = 50
+            #     l_img[y_offset:y_offset + s_img.shape[0], x_offset:x_offset + s_img.shape[1]] = s_img
+            #
+            #     cv2.putText(
+            #         annotatedFrame,
+            #         image_url,
+            #         (area.left(), area.top() - 20),
+            #         cv2.FONT_HERSHEY_SIMPLEX,
+            #         fontScale=0.75,
+            #         color=(152, 255, 204),
+            #         thickness=2)
 
             for p in openface.AlignDlib.OUTER_EYES_AND_NOSE:
                 cv2.circle(
@@ -439,6 +537,76 @@ class OpenFaceServerProtocol(WebSocketServerProtocol):
         plt.close()
         self.sendMessage(json.dumps(msg))
 
+    def detectPerson(self, dataURL):
+        head = "data:image/jpeg;base64,"
+        assert (dataURL.startswith(head))
+        imgdata = base64.b64decode(dataURL[len(head):])
+        imgF = StringIO.StringIO()
+        imgF.write(imgdata)
+        imgF.seek(0)
+        img = Image.open(imgF)
+
+        buf = np.fliplr(np.asarray(img))
+        annotatedFrame = np.copy(buf)
+        identities = []
+
+        def hit_callback(class_id, name, email, area, landmarks, score):
+            # draw the face area
+            if class_id not in identities:
+                identities.append(class_id)
+            bl = (area.left(), area.bottom())
+            tr = (area.right(), area.top())
+            cv2.rectangle(annotatedFrame, bl, tr, color=(153, 255, 204),
+                          thickness=3)
+
+            for p in openface.AlignDlib.OUTER_EYES_AND_NOSE:
+                cv2.circle(
+                    annotatedFrame,
+                    center=landmarks[p],
+                    radius=3,
+                    color=(102, 204, 255),
+                    thickness=-1)
+            cv2.putText(
+                annotatedFrame,
+                name,
+                (area.left(), area.top() - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                fontScale=0.75,
+                color=(152, 255, 204),
+                thickness=2)
+
+
+        hit, hit_cnt = _face_center.predict(img, hit_callback)
+
+        msg = {
+            "name": hit.name,
+            "type": "DETECTED",
+        }
+
+        # msg = {
+        #     "type": "IDENTITIES",
+        #     "identities": identities
+        # }
+        # self.sendMessage(json.dumps(msg))
+        #
+        # plt.figure()
+        # plt.imshow(annotatedFrame)
+        # plt.xticks([])
+        # plt.yticks([])
+        #
+        # imgdata = StringIO.StringIO()
+        # plt.savefig(imgdata, format='png')
+        # imgdata.seek(0)
+        # content = 'data:image/png;base64,' + \
+        #           urllib.quote(base64.b64encode(imgdata.buf))
+        # msg = {
+        #     "type": "ANNOTATED",
+        #     "content": content
+        # }
+        plt.close()
+        self.sendMessage(json.dumps(msg))
+
+
 def main(reactor):
     log.startLogging(sys.stdout)
 
@@ -449,10 +617,16 @@ def main(reactor):
                                      debug=False)
     factory.protocol = OpenFaceServerProtocol
     ctx_factory = DefaultOpenSSLContextFactory(tls_key, tls_crt)
-    # reactor.listenTCP(args.port, factory)
-    reactor.listenSSL(args.port, factory, ctx_factory)
-    # reactor.run()
+    reactor.listenTCP(args.port, factory, backlog=100)
+    # reactor.listenSSL(args.port, factory, ctx_factory)
+    reactor.run()
     return defer.Deferred()
 
 if __name__ == '__main__':
     task.react(main)
+# if __name__ == '__main__':
+#     log.startLogging(sys.stdout)
+#     factory = WebSocketServerFactory("ws://localhost:{}".format(args.port), debug=False)
+#     factory.protocol = OpenFaceServerProtocol
+#     reactor.listenTCP(args.port, factory)
+#     reactor.run()

@@ -152,16 +152,20 @@ class ClassifierOf(FaceClassifier):
                 class_id, predict_p.max(), predict_p))
             db_list = self._face_db.search('class_id', class_id, 1)
             self._log.debug("result({}): {}".format(len(db_list), db_list))
-            hit = db_list[0]
+            resultRecord = None
+            if len(db_list) != 0:
+                hit = db_list[0]
 
-        resultRecord = faceapi.FaceInfo(
-            phash,
-            hit['name'],
-            hit['eigen'],
-            'src_img_no_need',
-            hit['face_img'],
-            hit['class_id'])
-        resultRecord.scroe = hit_p
+                resultRecord = faceapi.FaceInfo(
+                phash,
+                hit['name'],
+                hit['email'],
+                hit['eigen'],
+                'src_img_no_need',
+                hit['face_img'],
+                hit['class_id'])
+                resultRecord.scroe = hit_p
+
         return resultRecord
 
     def _trainData(self):

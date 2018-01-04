@@ -22,13 +22,25 @@ BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 
 
 class FaceInfo:
-    def __init__(self, hash, name, eigen, src_hash, face_img, class_id):
+    def __init__(self, hash, name, email, eigen, src_hash, face_img, class_id):
         self.hash = hash  # string
         self.name = name  # string
+        self.email = email
         self.eigen = eigen  # float list
         self.src_hash = src_hash  # string
         self.face_img = face_img  # string
         self.class_id = class_id  # int
+
+
+class UserInfo:
+    def __init__(self, name, last, email, slack_tocken, department, job_title, face_class_id):
+        self.name = name
+        self.last = last
+        self.email = email
+        self.slack_token = slack_tocken
+        self.department = department
+        self.job_title = job_title
+        self.face_class_id = face_class_id
 
 
 class FaceCenter():
@@ -60,6 +72,10 @@ class FaceCenter():
 
     @abstractmethod
     def predict(self, image, callback):
+        pass
+
+    @abstractmethod
+    def create_user(self, user_info):
         pass
 
 
